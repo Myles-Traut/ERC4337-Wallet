@@ -18,12 +18,11 @@ contract SimpleAccount is BaseAccount {
         _;
     }
 
+    /// @notice Validate that only the contract owner is able to call a method
     modifier onlyOwner() {
         require(msg.sender == owner, "SmartWallet: Only Owner");
         _;
     }
-
-    event SimpleAccountInitialized(IEntryPoint indexed entryPoint, address indexed owner);
 
     constructor(IEntryPoint anEntryPoint , address _owner) {
         _entryPoint = anEntryPoint;
@@ -33,9 +32,7 @@ contract SimpleAccount is BaseAccount {
     /// @notice Able to receive ETH
     receive() external payable {}
 
-    /**
-     * deposit more funds for this account in the entryPoint
-     */
+    /* deposit more funds for this account in the entryPoint */
     function addDeposit() public payable {
         entryPoint().depositTo{value : msg.value}(address(this));
     }

@@ -2,48 +2,47 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-
-import {ECDSA} from "lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
-
 import "../src/AccountFactory.sol"; 
 import "../src/SimpleAccount.sol"; 
+import {ECDSA} from "lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import {IEntryPoint} from "lib/account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {UserOperation} from "lib/account-abstraction/contracts/interfaces/UserOperation.sol";
-
-
 
 contract SimpleAccountTest is Test {
 
     AccountFactory public factory;
-    IEntryPoint entryPoint;
+    IEntryPoint public entryPoint;
 
-    address owner;
-    address sender;
+    address public owner;
+    address public simpleWallet;
     address payable beneficiary;
     
-    uint256 ownerKey;
+    uint256 private ownerKey;
 
-    bytes32 salt = "0x12xxx345";
+    bytes32 private salt = "0x12xxx345";
 
     function setUp() public {
+
+        // beneficiary is an address that receives the fees from the bundler
         beneficiary = payable(address(makeAddr("beneficiary")));
         entryPoint = IEntryPoint(0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789);
         factory = new AccountFactory();
         (owner, ownerKey) = makeAddrAndKey("owner");
 
         // Precompute the wallet address
-        sender = factory.getAddress(salt, address(entryPoint), owner);
+        simpleWallet = factory.getAddress(salt, address(entryPoint), owner);
 
-        // Depotit ETH into entryPoint to pay for UserOp
+        // Prefund ETH into entryPoint to pay for UserOps
         deal(owner, 10 ether);
         vm.prank(owner);
-            entryPoint.depositTo{value: 5 ether}(sender);
+            entryPoint.depositTo{value: 5 ether}(simpleWallet);
     }
 
-    function test_InitCode() public {
+    function test_InitCodeAndTransfer() public {
 
+        // Create a user op with initCode.
         UserOperation memory op = _fillUserOp(
-            sender,
+            simpleWallet,
             abi.encodePacked(
             abi.encodePacked(address(factory)),
             abi.encodeWithSelector(factory.createAccount.selector, address(entryPoint), owner, salt)
@@ -56,43 +55,46 @@ contract SimpleAccountTest is Test {
         UserOperation[] memory ops = new UserOperation[](1);
         ops[0] = op;
 
-        // Check that there's no code at the sender address
-        uint256 codeSize = sender.code.length;
+        // Check that there's no code at the simpleWallet address
+        uint256 codeSize = simpleWallet.code.length;
         assertEq(codeSize, 0);
 
-        uint256 nonce = entryPoint.getNonce(sender, 0);
+        uint256 nonce = entryPoint.getNonce(simpleWallet, 0);
         assertEq(nonce, 0);
 
-        console.logUint(entryPoint.balanceOf(sender));
+        console.logUint(entryPoint.balanceOf(simpleWallet));
 
         /// Deploy wallet through the entryPoint
         vm.prank(owner);
             entryPoint.handleOps(ops, beneficiary);
 
         // Assert that the nonce has increased
-        nonce = entryPoint.getNonce(sender, 0);
+        nonce = entryPoint.getNonce(simpleWallet, 0);
         assertEq(nonce, 1);
 
-        // Assert that there is now code at the sender address
-        codeSize = sender.code.length;
+        // Assert that there is now code at the simpleWallet address
+        codeSize = simpleWallet.code.length;
         assertGt(codeSize, 0);
 
-        SimpleAccount wallet = SimpleAccount(payable(sender));
+        // Cast wallet to SimpleAccount for interaction
+        SimpleAccount wallet = SimpleAccount(payable(simpleWallet));
 
         address walletOwner = wallet.owner();
         address entryPointAddress = address(wallet.entryPoint());
         assertEq(walletOwner, owner);
         assertEq(entryPointAddress, address(entryPoint));
 
+        // Check wallet deposit in entryPoint
         console.logUint(wallet.getDeposit());
 
-        assertEq(sender.balance, 0 ether);
+        assertEq(simpleWallet.balance, 0 ether);
         // Give wallet 2 ether
-        deal(sender, 2 ether);
-        assertEq(sender.balance, 2 ether);
+        deal(simpleWallet, 2 ether);
+        assertEq(simpleWallet.balance, 2 ether);
 
+        // Ctreate UserOp to transfer 1 ETH from wallet to owner
         UserOperation memory op2 = _fillUserOp(
-            sender,
+            simpleWallet,
             "",
             abi.encodeWithSelector(
                 SimpleAccount.execute.selector,
@@ -102,18 +104,21 @@ contract SimpleAccountTest is Test {
             )
         );
 
+        // Sign UserOp
         op2.signature = abi.encodePacked(_signUserOpHash(vm, ownerKey, op2));
         UserOperation[] memory ops2 = new UserOperation[](1);
         ops2[0] = op2;
 
-        assertEq(sender.balance, 2 ether);
+        assertEq(simpleWallet.balance, 2 ether);
         assertEq(owner.balance, 5 ether);
 
+        // CAll from entryPoint
         entryPoint.handleOps(ops2, beneficiary);
 
-        assertEq(sender.balance, 1 ether);
+        assertEq(simpleWallet.balance, 1 ether);
         assertEq(owner.balance, 6 ether);
 
+        // EntryPoint pays for gas
         console.logUint(wallet.getDeposit());
     }
 
