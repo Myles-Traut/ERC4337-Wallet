@@ -47,7 +47,8 @@ contract SimpleAccountTest is Test {
             abi.encodePacked(
             abi.encodePacked(address(factory)),
             abi.encodeWithSelector(factory.createAccount.selector, address(entryPoint), owner, salt)
-            )
+            ),
+            ""
         );
 
         op.signature = abi.encodePacked(_signUserOpHash(vm, ownerKey, op));
@@ -61,6 +62,8 @@ contract SimpleAccountTest is Test {
 
         uint256 nonce = entryPoint.getNonce(sender, 0);
         assertEq(nonce, 0);
+
+        console.logUint(entryPoint.balanceOf(sender));
 
         /// Deploy wallet through the entryPoint
         vm.prank(owner);
@@ -80,6 +83,38 @@ contract SimpleAccountTest is Test {
         address entryPointAddress = address(wallet.entryPoint());
         assertEq(walletOwner, owner);
         assertEq(entryPointAddress, address(entryPoint));
+
+        console.logUint(wallet.getDeposit());
+
+        assertEq(sender.balance, 0 ether);
+        // Give wallet 2 ether
+        deal(sender, 2 ether);
+        assertEq(sender.balance, 2 ether);
+
+        UserOperation memory op2 = _fillUserOp(
+            sender,
+            "",
+            abi.encodeWithSelector(
+                SimpleAccount.execute.selector,
+                owner,
+                1 ether,
+                hex""
+            )
+        );
+
+        op2.signature = abi.encodePacked(_signUserOpHash(vm, ownerKey, op2));
+        UserOperation[] memory ops2 = new UserOperation[](1);
+        ops2[0] = op2;
+
+        assertEq(sender.balance, 2 ether);
+        assertEq(owner.balance, 5 ether);
+
+        entryPoint.handleOps(ops2, beneficiary);
+
+        assertEq(sender.balance, 1 ether);
+        assertEq(owner.balance, 6 ether);
+
+        console.logUint(wallet.getDeposit());
     }
 
     function _signUserOpHash(
@@ -94,11 +129,13 @@ contract SimpleAccountTest is Test {
 
     function _fillUserOp(
         address _sender,
-        bytes memory _data
+        bytes memory _initData,
+        bytes memory _callData
     ) internal view returns (UserOperation memory op) {
         op.sender = _sender;
         op.nonce = entryPoint.getNonce(_sender, 0);
-        op.initCode = _data;
+        op.initCode = _initData;
+        op.callData = _callData;
         op.callGasLimit = 10000000;
         op.verificationGasLimit = 10000000;
         op.preVerificationGas = 50000;

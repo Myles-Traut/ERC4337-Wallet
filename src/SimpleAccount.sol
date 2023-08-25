@@ -14,20 +14,24 @@ contract SimpleAccount is BaseAccount {
 
     /// @notice Validate that only the entryPoint is able to call a method
     modifier onlyEntryPoint() {
-        require(msg.sender == address(_entryPoint), "SmartWallet: Only entryPoint can call this method");
+        require(msg.sender == address(_entryPoint), "SmartWallet: Only EntryPoint");
         _;
     }
 
-    /// @notice Able to receive ETH
-    receive() external payable {}
+    modifier onlyOwner() {
+        require(msg.sender == owner, "SmartWallet: Only Owner");
+        _;
+    }
 
     event SimpleAccountInitialized(IEntryPoint indexed entryPoint, address indexed owner);
-    event PayPrefund(address indexed _payee, uint256 _amount);
 
     constructor(IEntryPoint anEntryPoint , address _owner) {
         _entryPoint = anEntryPoint;
         owner = _owner;
     }
+
+    /// @notice Able to receive ETH
+    receive() external payable {}
 
     /**
      * deposit more funds for this account in the entryPoint
@@ -41,7 +45,7 @@ contract SimpleAccount is BaseAccount {
      * @param withdrawAddress target to send to
      * @param amount to withdraw
      */
-    function withdrawDepositTo(address payable withdrawAddress, uint256 amount) public {
+    function withdrawDepositTo(address payable withdrawAddress, uint256 amount) public onlyOwner {
         entryPoint().withdrawTo(withdrawAddress, amount);
     }
 
@@ -79,9 +83,6 @@ contract SimpleAccount is BaseAccount {
     function getDeposit() public view returns (uint256) {
         return entryPoint().balanceOf(address(this));
     }
-    function validateSig(UserOperation calldata userOp, bytes32 userOpHash) public returns (uint256 validationData){
-        validationData = _validateSignature(userOp, userOpHash);
-    }
 
     /*--------------------------------*/
     /*------ INTERNAL FUNCTIONS ------*/
@@ -101,10 +102,6 @@ contract SimpleAccount is BaseAccount {
         return 0;
     }
 
-    function _validateNonce(uint256 nonce) internal override virtual view {
-        require(nonce < type(uint64).max);
-    }
-
     function _call(address target, uint256 value, bytes memory data) internal {
         (bool success, bytes memory result) = target.call{value : value}(data);
         if (!success) {
@@ -112,10 +109,5 @@ contract SimpleAccount is BaseAccount {
                 revert(add(result, 32), mload(result))
             }
         }
-    }
-
-    function _onlyOwner() internal view {
-        //directly from EOA owner, or through the account itself (which gets redirected through execute())
-        require(msg.sender == owner || msg.sender == address(this), "only owner");
     }
 }
